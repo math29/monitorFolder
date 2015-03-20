@@ -1,0 +1,383 @@
+==============================================================================
+Application : historique d'un répertoire   (Fabrice Harrouet, module CRS, 4UC)
+==============================================================================
+
+Il s'agit de réutiliser quelques notions concernant les processus et les
+moyens d'entrée/sortie dans le cadre d'une application simple.
+Nous nous proposons, dans ce cadre, de réaliser un service qui permet de
+garder automatiquement un historique du contenu d'un répertoire. 
+Un tel service surveille le contenu d'un répertoire de notre choix et dès
+qu'une nouvelle information y est apportée (ajout d'un nouveau fichier,
+modification d'un fichier existant) une copie en est effectuée et est
+mémorisée avec un horodatage dans une répertoire de sauvegarde.
+Ainsi, en théorie, il devient impossible de perdre une information qui a été
+présente dans le répertoire surveillé ; il est toujours possible de la
+retrouver parmi les copies horodatées.
+
+Une utilisation intéressante d'un tel outil serait la surveillance d'un
+répertoire de travail lors d'une épreuve pratique à l'ENIB.
+En effet, si un étudiant récupère le travail de quelqu'un d'autre puis passe
+le reste de la séance à y apporter des modifications mineures pour cacher la
+tricherie, cet outil permetra de revenir à la version non modifiée.
+L'horodatage est une information importante pour cet usage puisqu'en cas de
+travail régulier lors d'une épreuve, on constate que les fichiers sont
+modifiés par étapes successives pour progresser point par point dans le sujet.
+En revanche, en cas de tricherie, la rédaction des fichiers n'est pas du tout
+progressive : l'intégralité des fonctionnalités est très vite disponible et
+le reste du temps est passé à faire des modifications sans importances.
+
+Pour tester et mettre au point votre programme vous aurez besoin d'un
+répertoire dans lequel vous placerez et modifierez des fichiers (avec le
+shell, un gestionnaire de fichiers, un éditeur de texte ...).
+Voici un exemple :
+  $ mkdir Data                # créer le répertoire ``Data''
+  $ cp makefile Data          # y recopier le fichier ``makefile''
+  $ ls -l > Data/listing.txt  # y créer un fichier ``listing.txt''
+
+Votre programme sera lancé comme ceci :
+  $ ./fileHistory Data
+ce qui provoquera la surveillance du répertoire ``Data'' et en maintiendra
+un historique dans le répertoire ``Data_history''.
+Alors que ce programme fonctionne, vous devrez provoquer diverses opérations
+dans le répertoire ``Data'' :
+ - créer un fichier,
+ - modifier le contenu d'un fichier,
+ - lire le contenu d'un fichier,
+ - renommer un fichier,
+ - supprimer un fichier,
+ - ...
+afin d'en constater les effets (affichages dans la console) et notamment
+l'apparition de fichiers horodatés dans le répertoire ``Data_history''.
+Ce programme ne se termine jamais ; pour l'arrêter il suffit de saisir
+[Ctrl][c] dans la console.
+
+Concernant l'écriture du code proprement dite, vous veillerez à toujours
+contrôler le succès où l'échec des appels systèmes et ferez en sorte de
+réagir de manière appropriée :
+ - message de diagnostic pour tous les échecs,
+ - fin du processus pour les échecs irrécupérables (ex : le répertoire
+   à surveiller n'existe pas),
+ - abandon de l'opération en cours pour les échecs qui n'empêchent pas de
+   passer à la suite (ex : un des fichiers du répertoire n'est pas lisible).
+
+Les étapes suivantes décrites dans ce fichier indiquent où intervenir dans le
+code pour le compléter.
+Veillez à bien suivre les recommandations et en particulier à vous fier aux
+repères ({A-2}, {D-3}, ...) afin de ne pas vous perdre (il ne sont pas dans
+l'ordre, de haut en bas).
+
+==============================================================================
+A) Choix des répertoires
+
+Le programme ``fileHistory.c'', tel qu'il vous est initialement fourni, se
+contente d'analyser la ligne de commande afin de renseigner la variable
+globale ``watchDir'' avec le chemin du répertoire qu'il faudra surveiller.
+Cette analyse positionne également la variable globale ``useCompression''
+qui sera utilisée à la fin.
+
+Complétez le point {A-1} afin de vous assurer que ce répertoire existe bien.
+Pour ceci l'appel système ``stat()'' permet d'obtenir des informations sur
+les propriétés d'un chemin (échec si inexistant).
+En particulier, la macro ``S_ISDIR()'' permet de savoir si ce chemin désigne
+un répertoire.
+Si se chemin n'existe pas ou n'est pas un répertoire, le programme doit se
+terminer.
+
+Faire de même dans le point {A-2} pour le chemin ``historyDir'' (déduit de
+``watchDir'').
+S'il existe il faut s'assurer qu'il s'agit bien d'un répertoire.
+En revanche, s'il n'existe pas, il suffit de le créer avec l'appel système
+``mkdir()''.
+
+Documentation à consulter :
+  man 2 stat
+  man 2 mkdir
+
+==============================================================================
+B) Parcours d'un répertoire
+
+Avant que la surveillance du répertoire ``watchDir'' ne commence, il est
+nécessaire de s'assurer du fait que nous disposons dans ``historyDir'' d'une
+copie à jour de son contenu.
+C'est le propos de la fonction ``initialUpdate()''.
+
+Complétez alors le point {B-1} pour parcourir le contenu de ``watchDir'' avec
+les fonctions ``opendir()'', ``readdir()'' et ``closedir()''.
+Il suffit, pour chaque élément rencontré, d'appeler notre fonction
+``updateFile()'' (définie plus haut dans notre programme) en lui passant
+le nom de cet élément.
+
+Cette fonction ``updateFile()'' se contente pour l'instant d'afficher le
+chemin de l'élément qui lui est transmis ; elle sera complétée ultérieurement.
+Vous devez donc, à ce stade, visualiser le contenu du répertoire ``watchDir''.
+
+Documentation à consulter :
+  man 3 opendir
+  man 3 readdir
+  man 3 closedir
+
+==============================================================================
+C) Surveillance d'un répertoire
+
+C'est ici que nous mettons en place un moyen permettant d'obtenir une
+notification lorsque des opérations ont lieu sur le répertoire ``watchDir''.
+Le mécanisme ``inotify'' (spécifique au système Linux) propose une moyen
+efficace d'y parvenir.
+Il s'agit simplement de créer avec l'appel système ``inotify_init()'' un
+descripteur de fichier spécialisé dans la fourniture de telles notifications.
+L'appel système ``inotify_add_watch()'' permet d'indiquer un nouveau chemin
+(``watchDir'' dans notre cas) à propos duquel ce descripteur fournira des
+notifications (tout ceci vous est déjà fourni dans le code).
+
+L'obtention de ces notifications consiste simplement en une opération de
+lecture, avec l'appel système ``read()'', sur le descripteur.
+Complétez maintenant le point {C-1} pour réaliser cette lecture.
+Ceci permet d'obtenir un paquet d'octets qui seront considérés comme le
+contenu d'une ou plusieurs structures de données décrivant ces notifications.
+Pour corser le tout, ces notifications ont une taille variable qui dépend
+du nom du fichier concerné par la notification ; la boucle qui vous est
+fournie dans le code permet de désigner successivement ces structures et
+d'en afficher succinctement le contenu.
+Observez alors le fonctionnement de votre programme en provoquant diverses
+opérations dans le répertoire ``watchDir'' :
+ - créer un fichier,
+ - modifier le contenu d'un fichier,
+ - lire le contenu d'un fichier,
+ - renommer un fichier,
+ - supprimer un fichier,
+ - ...
+ 
+Vous devriez en déduire que pour le service d'historique que nous cherchons à
+réaliser, les seuls événements qui nous intéressent sont :
+ - IN_MODIFY : le contenu d'un fichier vient d'être modifié,
+ - IN_MOVED_TO : un fichier vient d'être renommé, c'est comme si apparaissait
+   spontanément un nouveau fichier dont le contenu est celui de l'ancien.
+Complétez alors le point {C-2} pour appeler notre fonction ``updateFile()''
+lorsque le masque de la notification contient l'un de ces deux drapeaux.
+Bien entendu, en l'état cette fonction ne fait rien de plus que d'afficher
+les chemins concernés par ces opérations, mais ce sont eux qui feront
+prochainement l'objet d'un archivage.
+
+Documentation à consulter :
+  man 7 inotify
+  man 2 inotify_init
+  man 2 inotify_add_watch
+  man 2 read
+
+==============================================================================
+D) Copie des fichiers
+
+Le programme principal est maintenant en mesure de déterminer lorsqu'un
+élément du répertoire surveillé doit être considéré pour la mise à jour de
+l'historique :
+ - au lancement du programme,
+ - lorsque le contenu d'un élément est modifié,
+ - lorsqu'un élément est déplacé.
+Ceci se traduit à chaque fois par l'appel de notre fonction ``updateFile()''
+sur l'élément considéré.
+
+Un répertoire peut contenir des éléments de diverses natures (fichiers,
+répertoires, liens symboliques, sockets, tubes, périphérique) ; nous ne nous
+intéresserons ici qu'aux fichiers (sans descendre dans les sous-répertoires
+afin de simplifier l'exercice).
+Commencez donc par compléter le point {D-1} afin de quitter prématurément la
+fonction (avec ``return'') si ``path'' ne désigne pas un tel fichier.
+Pour ceci vous devez à nouveau utiliser l'appel système ``stat()'' mais cette
+fois analyser ses informations avec la macro ``S_ISREG()''.
+
+Pour que la sauvegarde soit un historique il ne faut pas que la nouvelle copie
+d'un fichier écrase sa sauvegarde précédente (il serait alors impossible de
+retrouver sa version antérieure).
+Afin d'éviter ceci, nous ajoutons à chaque nom de fichier de sauvegarde un
+horodatage ; un même fichier dans ``watchDir'' fera donc apparaître, au fur et
+à mesure de ses modifications, de multiples fichiers dans ``historyDir'' ayant
+tous le même préfixe (le nom de fichier d'origine) mais se terminant par des
+suffixes différents représentant la date de chaque sauvegarde exprimée en
+secondes avec des décimales.
+Complétez donc le point {D-2} pour obtenir cette date à l'aide de l'appel
+système ``gettimeofday()''.
+Le nom de la copie de sauvegarde ``copyPath'' peut alors être généré.
+
+Maintenant qu'est déterminé le nom du fichier de sauvegarde il n'y a plus qu'à
+réaliser la copie des données.
+C'est le rôle de la fonction ``generateBackup()'' que vous devrez compléter au
+niveau du point {D-3}.
+Le fichier source sera ouvert en lecture avec :
+  int input=open(srcPath,O_RDONLY);
+et le fichier destination en écriture avec:
+  int output=open(destPath,O_WRONLY|O_TRUNC|O_CREAT,0666);
+La recopie proprement dite consiste à tenter de lire un bloc d'octets avec
+l'appel système ``read()'' et à écrire avec l'appel système ``write()'' la
+quantité effectivement obtenue (peut être moins que la capacité demandée).
+Cette recopie par bloc se répète jusqu'à détecter la fin de fichier (ou une
+erreur).
+Il n'y a plus qu'à fermer les fichiers avec l'appel système ``close()''.
+Vous obtiendrez alors une première version fonctionnelle de notre service de
+maintien d'un historique d'un répertoire.
+
+Documentation à consulter :
+  man 2 stat
+  man 2 gettimeofday
+  man 2 open
+  man 2 read
+  man 2 write
+  man 2 close
+
+==============================================================================
+E) Évitement des doublons
+
+Il peut arriver que la fonction ``updateFile()'' crée plusieurs copies
+horodatées successives d'un fichier ayant à chaque fois le même contenu.
+C'est le cas par exemple lorsque le programme est arrêté puis immédiatement
+relancé : la recopie initiale au début du nouveau lancement produit de
+nouvelles copies horodatées identiques aux dernières en date lors du précédent
+arrêt.
+C'est également le cas lorsqu'un fichier est ouvert (avec un éditeur de texte
+par exemple) puis sauvegardé à nouveau sans que son contenu n'ait subi de
+modification.
+
+Pour éviter ceci, la fonction ``updateFile()'' appelle d'abord la fonction
+``lookForLastCopy()'' afin de rechercher la dernière copie horodatée du
+fichier considéré ; si un telle copie existe, un appel à la fonction
+``identicalCopy()'' en comparera le contenu avec celui de la version courante
+afin de déterminer si une nouvelle copie est nécessaire.
+Dans ce cas, la fonction ``updateFile()'' poursuit simplement son traitement
+en générant une nouvelle copie horodatée (comme c'était déjà le cas avant
+cette précaution).
+
+Complétez tout d'abord le point {E-1} de la fonction ``lookForLastCopy()''
+afin de rechercher l'éventuelle dernière copie horodatée de ''fileName''.
+Il s'agit de parcourir ``historyDir'' (avec les fonctions ``opendir()'',
+``readdir()'' et ``closedir()''), à la recherche d'éléments dont le nom
+commence par celui du fichier considéré, est suivi d'un souligné ``_'' et se
+termine par une valeur réelle.
+Parmi ceux-ci on ne retiendra que celui dont la valeur réelle (l'horodatage)
+est la plus grande.
+Une telle vérification peut s'appuyer sur cette manière de procéder :
+  double lastTimeStamp=-1.0;
+  char lastCopy[0x100]="";
+  int prefixLen=strlen(fileName);
+  // ...
+  const char *elementName= ...
+  double suffix;
+  if((!strncmp(elementName,fileName,prefixLen))&&        // same prefix
+     (sscanf(elementName+prefixLen,"_%lg",&suffix)==1)&& // suitable suffix
+     (suffix>lastTimeStamp))                             // last copy
+    {
+    lastTimeStamp=suffix;
+    strcpy(lastCopy,elementName);
+    // ``lastCopy'' est jusqu'alors la dernière copie de ``fileName''
+    }
+
+Si l'étape précédente détecte effectivement la dernière copie horodatée de
+``fileName'' alors les variables ``lastTimeStamp'' et ``lastCopy'' ont des
+valeurs significatives.
+Il nous faut dans ce cas compléter le point {E-2} de la fonction
+``identicalCopy()'' afin de détecter si cette copie est identique à
+l'original.
+Nous nous appuierons ici sur la réutilisation du programme ``cmp'' qui est
+spécialisé dans cette tâche.
+La commande :
+  cmp -s un_fichier un_autre_fichier
+se termine en renvoyant 0 (par ``exit()'' ou comme résultat de ``main()'') si
+les deux fichiers ont un contenu identique.
+Nous procéderons alors au recouvrement (avec ``execvp()'') d'un processus
+enfant (créer par ``fork()'') pour exécuter une telle commande.
+Il suffira alors d'attendre (avec ``waitpid()'') la fin de ce processus
+pour obtenir sa valeur de retour (avec la macro ``WEXITSTATUS()'').
+Si cette valeur est nulle, aucune nouvelle copie horodatée n'est nécessaire,
+il suffit de renvoyer ``true'', ce qui provoquera la terminaison prématurée
+de la fonction ``updateFile()''.
+
+En testant à nouveau votre programme, vous devriez constater que plus aucun
+doublon inutile n'est créé.
+
+Documentation à consulter :
+  man 3 opendir
+  man 3 readdir
+  man 3 closedir
+  man 3 strlen
+  man 3 strncmp
+  man 3 sscanf
+  man 3 strcpy
+  man 1 cmp
+  man 2 fork
+  man 3 execvp
+  man 2 waitpid
+
+==============================================================================
+F) Compression des copies
+
+Bien que sur de tous petits fichiers ce ne soit pas intéressant, on pourrait
+envisager, dans le cas d'une utilisation normale de fichiers conséquents, de
+compresser les données archivées.
+Ceci a deux conséquences sur le code de notre programme :
+ - dans ``generateBackup()'', la création d'une copie horodatée n'est plus une
+   simple copie des octets mais utilise une étape de compression,
+ - dans ``identicalCopy()'', la comparaison du contenu d'un fichier avec celui
+   de sa dernière copie horodatée nécessite une étape de décompression
+   préalable.
+
+La ligne de commande de notre programme accepte une option ``-c'' qui
+permet d'activer la compression en positionnant la variable globale
+``useCompression''.
+Dans ce cas, les points {D-3} et {E-2} deviennent inopérants (ils seront
+désormais remplacés par les points {F-1} et {F-2}).
+
+Dans la fonction ``generateBackup()'', le point {F-1} doit alors être complété
+pour provoquer le recouvrement d'un processus enfant (``fork()'' et
+``execvp()'') par la commande ``gzip'' qui lit les données provenant de son
+entrée standard et en produit une version compressée sur sa sortie standard.
+Dans l'enfant, avant le recouvrement, il sera donc nécessaire de provoquer les
+redirections (avec ``dup2()'') :
+ - de l'entrée standard depuis le fichier source ouvert en lecture,
+ - de la sortie standard vers le fichier destination ouvert en écriture.
+Le processus parent se contente d'attendre (``avec waitPid()'') la terminaison
+de l'enfant.
+
+Dans la fontion ``identicalCopy()'', le point {F-2} doit être complété pour
+faire apparaître deux processus enfants réalisant respectivement la
+décompression et la comparaison.
+Le premier enfant sera recouvert par la commande ``gunzip'' qui lit les
+données (supposées compressées) provenant de son entrée standard et en produit
+une version décompressée sur sa sortie standard.
+Le second enfant sera recouvert par la commande :
+  cmp -s un_fichier
+qui compare le contenu de son entrée standard avec le contenu du fichier
+spécifié (désigné par ``path'' ici), et renvoie 0 s'ils sont identiques.
+Il faudra donc au préalable créer un tube de communication (avec ``pipe()'')
+dont bénéficieront les deux enfants (le parent ne s'en sert pas directement).
+Les redirections (``dup2()'') à effectuer dans les enfants sont :
+ - l'entrée standard du premier depuis le fichier ``lastPath'' ouvert en
+   lecture,
+ - la sortie standard du premier vers le côté écriture ([1]) du tube,
+ - l'entrée standard du second depuis le côté lecture([0]) du tube.
+Ainsi le tube relie bien la sortie standard du premier enfant (version
+décompressée de ``lastPath'') avec l'entrée standard du second enfant pour que
+ce dernier en compare le contenu avec celui du fichier désigné par ``path'').
+Le processus parent se contente d'attendre la terminaison de ses deux enfants
+en interprète le résultat du second comme dans le point {E-2}.
+
+Votre programme doit maintenant être complet, testez-en attentivement le
+fonctionnement avec l'option ``-c''.
+nb : pour visualiser dans la console le contenu d'un fichier compressé on
+     peut utiliser la commande  suivante :
+       $ gunzip < fichier_compressé
+
+Si vous voulez aller plus loin vous pouvez réfléchir aux moyens de :
+ - restaurer les fichiers à une date choisie,
+ - gérer les sous-répertoires.
+
+Documentation à consulter :
+  man 2 fork
+  man 2 open
+  man 2 dup2
+  man 2 close
+  man 3 execvp
+  man 2 waitpid
+  man 2 pipe
+  man 1 gzip
+  man 1 gunzip
+  man 1 cmp
+
+==============================================================================
